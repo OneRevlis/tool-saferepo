@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# vet <git-url|path> — clone (if needed) and scan a repo WITHOUT running it.
+# Reading/cloning is safe; nothing in the repo is executed here. This is
+# STATIC ANALYSIS: look, don't touch.
+set -euo pipefail
+
+SRC="${1:?usage: vet <git-url|local-path>}"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/vet.XXXXXX")"
+
+if [ -d "$SRC" ]; then
+  cp -R "$SRC" "$WORK/repo"
+else
+  git clone --depth 1 "$SRC" "$WORK/repo"
+fi
+REPO="$WORK/repo"
+echo "=== vetting: $REPO ==="
+
+echo; echo "### 1. Install/build hooks (code that auto-runs on install) ###"
+grep -rnE '"(pre|post)(install|pack|prepare)"' \
+  "$REPO"/package.json "$REPO"/*/package.json 2>/dev/null || echo "  (none in root package.json)"
+[ -f "$REPO/setup.py" ] && echo "  setup.py present (runs code on 'pip install')"
+
+echo; echo "### 2. Dangerous patterns (remote exec / obfuscation) ###"
+grep -rnE 'curl[^|]*\|[[:space:]]*(ba)?sh|wget[^|]*\|[[:space:]]*(ba)?sh|eval\(|new Function\(|base64 -d|atob\(|child_process' \
+  "$REPO" --include='*.js' --include='*.ts' --include='*.mjs' --include='*.sh' --include='*.py' \
+  2>/dev/null | grep -v node_modules | head -30 || echo "  (none found)"
+
+echo; echo "### 3. Trivy scan (CVEs + leaked secrets) — dockerized, nothing installed on host ###"
+docker run --rm -v "$REPO":/scan:ro aquasec/trivy:latest fs --scanners vuln,secret --severity HIGH,CRITICAL /scan
+
+echo; echo "=== done. Source is at: $REPO ==="
+echo "If it looks clean, run it isolated:   sandbox $REPO --no-net"
