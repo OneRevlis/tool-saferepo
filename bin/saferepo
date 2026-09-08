@@ -21,16 +21,15 @@ NODE="node@sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c
 
 # AI triage: when GuardDog flags packages, ask DeepSeek (cheap) whether each is a
 # known-legit package (false positive) or genuinely suspicious. ADVISORY ONLY —
-# it explains findings, it never decides "safe". Skips silently with no key / no
-# flags, or if SAFEREPO_NO_AI=1.
+# it explains findings, it never decides "safe". Set DEEPSEEK_API_KEY to enable;
+# skips with no key / no flags, or if SAFEREPO_NO_AI=1.
 ai_triage() {
   [ "${SAFEREPO_NO_AI:-0}" = "1" ] && return 0
   local gd="$1" pkgs
   pkgs="$(grep -iE 'Scanning .+, found [0-9]+ risk' "$gd" 2>/dev/null | sed -E 's/.*Scanning (.+), found.*/\1/' | tr ',' '\n' | sed 's/^ *//' | sort -u | paste -sd', ' - || true)"
   [ -z "$pkgs" ] && return 0
-  local envf="$HOME/pal-mcp-server/.env" key=""
-  [ -f "$envf" ] && key="$(grep -E '^CUSTOM_API_KEY=' "$envf" | head -1 | cut -d= -f2- | tr -d '"'"'"'')"
-  [ -z "$key" ] && { echo "  (AI triage skipped — no DeepSeek key in $envf)"; return 0; }
+  local key="${DEEPSEEK_API_KEY:-}"
+  [ -z "$key" ] && { echo "  (AI triage skipped — set DEEPSEEK_API_KEY to enable)"; return 0; }
   echo; echo "### AI triage of flagged packages (DeepSeek — advisory, not a verdict) ###"
   local prompt="A heuristic security scanner flagged these npm packages: ${pkgs}. For EACH package, give one short line: is it a well-known legitimate package (likely a false positive) or genuinely suspicious / a possible typosquat, and why. Be concise. Note that scanners often flag packages that bundle native binaries. End with one line: overall, do these look routine or is anything worth a closer look?"
   local body

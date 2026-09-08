@@ -31,6 +31,15 @@ Clones it inside a container (never host git) and checks:
 4. **AI triage** (DeepSeek) — explains any GuardDog-flagged package as likely
    false-positive vs suspicious (advisory only, never decides pass/fail)
 
+AI triage is optional and only runs when you explicitly provide a key:
+
+```bash
+export DEEPSEEK_API_KEY='...'
+```
+
+Without it, the other scans still run. `saferepo` never searches your computer
+or another project's `.env` file for credentials.
+
 Passing = **"no known red flags"**, NOT proof. It tells you to build & run in
 `sandbox` (install-scripts off), and records the repo + commit so you don't re-vet
 every launch. A `curl|bash` in the source → refuses to record.
