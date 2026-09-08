@@ -19,9 +19,10 @@ for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
 done
 
 echo ">> Pre-pulling scanner + sandbox images (one time)..."
-docker pull aquasec/trivy:latest  >/dev/null 2>&1 || true
-docker pull node:22-bookworm      >/dev/null 2>&1 || true
-docker pull nicolaka/netshoot     >/dev/null 2>&1 || true
+docker pull aquasec/trivy:latest         >/dev/null 2>&1 || true
+docker pull ghcr.io/datadog/guarddog:latest >/dev/null 2>&1 || true
+docker pull node:22-bookworm             >/dev/null 2>&1 || true
+docker pull nicolaka/netshoot            >/dev/null 2>&1 || true
 
 echo
 echo ">> Done. Restart your terminal (or: source ~/.zshrc), then:"

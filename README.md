@@ -25,9 +25,18 @@ vet https://github.com/some/repo
 Clones to a temp dir and checks:
 1. Install/build hooks — code that auto-runs on `npm install` / `pip install`
 2. Remote-exec & obfuscation patterns (`curl|bash`, `eval`, base64 blobs)
-3. Trivy scan — known CVEs in dependencies + leaked secrets/keys
+3. **Trivy** — known CVEs in dependencies + leaked secrets/keys
+4. **GuardDog** (Datadog) — *malicious* dependencies: typosquats, exfil, bundled
+   binaries, install-time payloads. This is the one that scans the DEPS, not just
+   the repo's own code — the gap plain CVE scanners miss.
 
-Reading a repo never executes it, so this stage cannot hurt you.
+Add `--deep` to also install deps in an isolated container (`--ignore-scripts`)
+and Trivy-scan the installed `node_modules`:
+```bash
+vet https://github.com/some/repo --deep
+```
+
+Reading/scanning never executes the repo's code, so this stage cannot hurt you.
 
 ### `sandbox <path> [--no-net|--watch]` — run it isolated (dynamic analysis)
 The container sees **only the repo** at `/repo` — no home dir, no SSH keys, no

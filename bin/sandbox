@@ -1,38 +1,44 @@
 #!/usr/bin/env bash
-# sandbox <path> [--no-net|--watch] — run an untrusted repo inside a throwaway
-# Docker container. The container has NO access to your home dir, SSH keys, or
-# secrets — only the repo, mounted at /repo. Delete on exit, damage gone.
+# sandbox <path> [--no-net|--watch] — run an untrusted repo inside a hardened,
+# throwaway Docker container. NO access to your home dir, SSH keys, or secrets —
+# only the repo at /repo. Deleted on exit.
 #
+# Hardening applied to every mode:
+#   --cap-drop=ALL              drop all Linux capabilities
+#   --security-opt=no-new-privileges  block privilege escalation (sudo/setuid)
+#
+# Modes:
 #   (default)   network ON, host filesystem still isolated
 #   --no-net    network OFF — safest; nothing can phone home or exfiltrate
-#   --watch     network ON but every connection the code makes is LOGGED
+#   --watch     network ON but every connection the code makes is LOGGED (tripwire)
 set -euo pipefail
 
 REPO="${1:?usage: sandbox <local-repo-path> [--no-net|--watch]}"
 REPO="$(cd "$REPO" && pwd)"
 MODE="${2:-}"
 IMAGE="node:22-bookworm"
+HARDEN=(--cap-drop=ALL --security-opt=no-new-privileges)
 
 case "$MODE" in
   --no-net)
-    echo "=== sandbox: $REPO  (network: OFF, fs: isolated) ==="
-    docker run --rm -it --network none -v "$REPO":/repo -w /repo "$IMAGE" bash
+    echo "=== sandbox: $REPO  (network: OFF, hardened, fs: isolated) ==="
+    docker run --rm -it --network none "${HARDEN[@]}" -v "$REPO":/repo -w /repo "$IMAGE" bash
     ;;
   --watch)
-    echo "=== sandbox: $REPO  (network: ON + LOGGED, fs: isolated) ==="
+    echo "=== sandbox: $REPO  (network: ON + LOGGED, hardened, fs: isolated) ==="
+    echo "!! --watch LOGS traffic, it does not BLOCK it. Use --no-net for real protection."
     NAME="vetbox_$$"
     cleanup() { docker rm -f "$NAME" "${NAME}_cap" >/dev/null 2>&1 || true; }
     trap cleanup EXIT
-    docker run -d --name "$NAME" -v "$REPO":/repo -w /repo "$IMAGE" sleep infinity >/dev/null
-    # sidecar shares the box's network namespace and dumps every connection attempt
+    docker run -d --name "$NAME" "${HARDEN[@]}" -v "$REPO":/repo -w /repo "$IMAGE" sleep infinity >/dev/null
     docker run -d --name "${NAME}_cap" --network "container:$NAME" \
       nicolaka/netshoot tcpdump -nn -q -l "tcp[tcpflags] & tcp-syn != 0 or udp port 53" >/dev/null
-    echo ">> Live network log (Ctrl-C the tail to stop watching), shell is below."
-    docker logs -f "${NAME}_cap" &   # stream connection attempts to your screen
+    echo ">> Live connection log streaming below; shell is under it."
+    docker logs -f "${NAME}_cap" &
     docker exec -it "$NAME" bash
     ;;
   *)
-    echo "=== sandbox: $REPO  (network: ON, fs: isolated) ==="
-    docker run --rm -it -v "$REPO":/repo -w /repo "$IMAGE" bash
+    echo "=== sandbox: $REPO  (network: ON, hardened, fs: isolated) ==="
+    docker run --rm -it "${HARDEN[@]}" -v "$REPO":/repo -w /repo "$IMAGE" bash
     ;;
 esac
