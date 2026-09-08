@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# saferepo — onboard a repo safely, once, then just use it.
+#
+#   saferepo add <git-url>   clone (isolated) → scan (Trivy + GuardDog) → if no
+#                            malware, keep it in ~/repos and record it as vetted
+#   saferepo list            show everything you've vetted + how to launch it
+#   saferepo scan <url|path> scan only, record nothing
+#
+# Vet ONCE. After that it's a normal installed app/tool — launch it freely.
+# Re-run `add` to re-vet after you pull an update.
+set -euo pipefail
+
+KIT="$HOME/security-sandbox-kit"
+REG="$KIT/trusted.md"
+REPOS="$HOME/repos"
+TRIVY="aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
+GUARDDOG="ghcr.io/datadog/guarddog@sha256:3dbc783f65f508b95222101cb2cd84d1d5f3e3675e42d6f1329bb9b8a99c8998"
+NODE="node@sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d"
+
+scan_dir() { # $1 = path ; prints findings, returns 1 if a hard malware signal is found
+  local d="$1" bad=0
+  echo "### malicious-package scan (GuardDog) ###"
+  if [ -f "$d/package.json" ]; then
+    docker run --rm -v "$d":/scan:ro "$GUARDDOG" npm verify /scan/package.json 2>&1 | tail -30
+  else echo "  (no package.json — skipped)"; fi
+  echo; echo "### vuln + secret scan (Trivy) ###"
+  docker run --rm -v "$d":/scan:ro "$TRIVY" fs --scanners vuln,secret --severity HIGH,CRITICAL /scan 2>&1 | tail -18
+  echo; echo "### high-confidence malware check (remote script piped to shell) ###"
+  local pipe
+  pipe="$(grep -rnE '(curl|wget)[^|]*\|[[:space:]]*(ba)?sh' "$d" \
+    --include='*.js' --include='*.ts' --include='*.mjs' --include='*.sh' --include='*.json' 2>/dev/null \
+    | grep -v node_modules | head || true)"
+  if [ -n "$pipe" ]; then echo "  ⛔ FOUND:"; echo "$pipe"; bad=1; else echo "  none"; fi
+  return $bad
+}
+
+case "${1:-help}" in
+  add)
+    URL="${2:?usage: saferepo add <git-url>}"
+    NAME="$(basename "${URL%.git}")"
+    DEST="$REPOS/$NAME"
+    mkdir -p "$REPOS"
+    if [ -d "$DEST" ]; then echo ">> $DEST exists — re-vetting existing copy"; else
+      echo ">> cloning $NAME in an isolated container..."
+      docker run --rm -v "$REPOS":/out -w /out "$NODE" git clone --depth 1 "$URL" "$NAME"
+    fi
+    echo "==================== SCAN: $NAME ===================="
+    if scan_dir "$DEST"; then
+      COMMIT="$(git -C "$DEST" rev-parse --short HEAD 2>/dev/null || echo '?')"
+      [ -f "$REG" ] || printf '# Vetted repos\n\n| name | url | commit | vetted | path |\n|---|---|---|---|---|\n' > "$REG"
+      grep -qF "| $NAME |" "$REG" 2>/dev/null || echo "| $NAME | $URL | $COMMIT | $(date +%Y-%m-%d) | $DEST |" >> "$REG"
+      echo; echo "✅ $NAME — no malware signals. Recorded as vetted."
+      echo "Build it from the source you just vetted, then use it natively:"
+      [ -f "$DEST/package.json" ] && echo "   cd $DEST && npm install && npm run build" || echo "   (see the repo's README for build steps)"
+      echo "Later, to remember what's safe:   saferepo list"
+    else
+      echo; echo "⛔ $NAME — high-confidence malware signal. NOT recorded. Do not run it."
+      echo "   Inspect only in isolation:   sandbox $DEST"
+      exit 1
+    fi
+    ;;
+  scan)
+    T="${2:?usage: saferepo scan <git-url|path>}"
+    if [ -d "$T" ]; then scan_dir "$T" || true
+    else
+      W="$(mktemp -d)"; docker run --rm -v "$W":/out -w /out "$NODE" git clone --depth 1 "$T" repo
+      scan_dir "$W/repo" || true
+    fi
+    ;;
+  list)
+    if [ -f "$REG" ]; then cat "$REG"; else echo "nothing vetted yet — start with:  saferepo add <git-url>"; fi
+    ;;
+  *)
+    echo "usage:"
+    echo "  saferepo add <git-url>    vet a repo and register it as safe to use"
+    echo "  saferepo list             show your vetted repos"
+    echo "  saferepo scan <url|path>  scan only, record nothing" ;;
+esac
