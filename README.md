@@ -13,6 +13,9 @@ run only inside a disposable box that can't see my real machine.
    ```
    Restart the terminal. Done.
 
+`trusted.md` is created locally when you pass triage. It is ignored by Git and
+is not part of this kit's public source.
+
 > **Windows:** run everything inside **WSL2** (Ubuntu) or **Git Bash**. Docker
 > Desktop with the WSL2 backend makes the exact same commands work.
 
