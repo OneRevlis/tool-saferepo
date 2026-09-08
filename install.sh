@@ -9,7 +9,7 @@ command -v docker >/dev/null || { echo "!! Install Docker Desktop first: https:/
 command -v git    >/dev/null || { echo "!! Install git first"; exit 1; }
 docker info >/dev/null 2>&1 || echo "!! Docker is installed but not running — start Docker Desktop, then re-run."
 
-chmod +x "$KIT/bin/vet" "$KIT/bin/sandbox"
+chmod +x "$KIT/bin/saferepo" "$KIT/bin/sandbox"
 
 # Add the kit's bin to PATH for both bash and zsh, once.
 LINE="export PATH=\"$KIT/bin:\$PATH\""
@@ -26,5 +26,5 @@ docker pull nicolaka/netshoot@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00
 
 echo
 echo ">> Done. Restart your terminal (or: source ~/.zshrc), then:"
-echo "     vet https://github.com/some/repo"
-echo "     sandbox /tmp/vet.XXXX/repo --no-net"
+echo "     saferepo add https://github.com/some/repo"
+echo "     saferepo list"
