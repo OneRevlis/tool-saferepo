@@ -6,8 +6,10 @@
 #   saferepo list            show everything you've vetted + how to launch it
 #   saferepo scan <url|path> scan only, record nothing
 #
-# Vet ONCE. After that it's a normal installed app/tool — launch it freely.
-# Re-run `add` to re-vet after you pull an update.
+# SCOPE: the dependency-malware scan (GuardDog) is npm-only. Python/Go/Rust/Ruby
+# get the curl|wget-to-shell + secret/vuln checks but NO malicious-package scan.
+# "Passed triage" means "no known red flags", NOT "proven safe" — build & run it
+# in `sandbox` first; the sandbox stays the real control. Re-run `add` after updates.
 set -euo pipefail
 
 KIT="$HOME/security-sandbox-kit"
@@ -54,7 +56,8 @@ scan_dir() { # $1 = path ; prints findings, returns 1 if a hard malware signal i
   echo; echo "### high-confidence malware check (remote script piped to shell) ###"
   local pipe
   pipe="$(grep -rnE '(curl|wget)[^|]*\|[[:space:]]*(ba)?sh' "$d" \
-    --include='*.js' --include='*.ts' --include='*.mjs' --include='*.sh' --include='*.json' 2>/dev/null \
+    --include='*.js' --include='*.ts' --include='*.mjs' --include='*.sh' --include='*.json' \
+    --include='*.py' --include='*.rb' --include='*.yml' --include='*.yaml' --include='Makefile' 2>/dev/null \
     | grep -v node_modules | head || true)"
   if [ -n "$pipe" ]; then echo "  ⛔ FOUND:"; echo "$pipe"; bad=1; else echo "  none"; fi
   ai_triage "$gdcap"
@@ -75,12 +78,18 @@ case "${1:-help}" in
     echo "==================== SCAN: $NAME ===================="
     if scan_dir "$DEST"; then
       COMMIT="$(git -C "$DEST" rev-parse --short HEAD 2>/dev/null || echo '?')"
-      [ -f "$REG" ] || printf '# Vetted repos\n\n| name | url | commit | vetted | path |\n|---|---|---|---|---|\n' > "$REG"
+      [ -f "$REG" ] || printf '# Repos that passed triage (NOT a safety guarantee)\n\n| name | url | commit | triaged | path |\n|---|---|---|---|---|\n' > "$REG"
       grep -qF "| $NAME |" "$REG" 2>/dev/null || echo "| $NAME | $URL | $COMMIT | $(date +%Y-%m-%d) | $DEST |" >> "$REG"
-      echo; echo "✅ $NAME — no malware signals. Recorded as vetted."
-      echo "Build it from the source you just vetted, then use it natively:"
-      [ -f "$DEST/package.json" ] && echo "   cd $DEST && npm install && npm run build" || echo "   (see the repo's README for build steps)"
-      echo "Later, to remember what's safe:   saferepo list"
+      echo; echo "✅ $NAME — PASSED TRIAGE (no malware signals in an npm-focused scan)."
+      echo "   This is a filter, not proof. Build with install-scripts OFF, inside the sandbox:"
+      if [ -f "$DEST/package.json" ]; then
+        echo "     sandbox $DEST            # isolated shell; then inside:"
+        echo "     npm ci --ignore-scripts && npm run build"
+      else
+        echo "     sandbox $DEST            # then build per the repo's README (install-scripts off)"
+      fi
+      echo "   Only run it natively once you've built it and are satisfied (GUI apps: separate macOS user)."
+      echo "   Recorded. See everything triaged:   saferepo list"
     else
       echo; echo "⛔ $NAME — high-confidence malware signal. NOT recorded. Do not run it."
       echo "   Inspect only in isolation:   sandbox $DEST"

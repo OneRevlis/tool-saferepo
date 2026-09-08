@@ -18,25 +18,26 @@ run only inside a disposable box that can't see my real machine.
 
 ## The two commands
 
-### `vet <git-url>` — scan, run NOTHING (static analysis)
+### `saferepo add <git-url>` — onboard a repo once, then reuse it
 ```bash
-vet https://github.com/some/repo
+saferepo add https://github.com/some/repo
+saferepo list      # everything you've triaged + where it lives
 ```
-Clones to a temp dir and checks:
-1. Install/build hooks — code that auto-runs on `npm install` / `pip install`
-2. Remote-exec & obfuscation patterns (`curl|bash`, `eval`, base64 blobs)
-3. **Trivy** — known CVEs in dependencies + leaked secrets/keys
-4. **GuardDog** (Datadog) — *malicious* dependencies: typosquats, exfil, bundled
-   binaries, install-time payloads. This is the one that scans the DEPS, not just
-   the repo's own code — the gap plain CVE scanners miss.
+Clones it inside a container (never host git) and checks:
+1. **GuardDog** (Datadog) — *malicious* npm dependencies: typosquats, exfil,
+   bundled binaries, install-time payloads
+2. **Trivy** — known CVEs + leaked secrets
+3. **curl|wget → shell** in the repo's own source (the one hard block)
+4. **AI triage** (DeepSeek) — explains any GuardDog-flagged package as likely
+   false-positive vs suspicious (advisory only, never decides pass/fail)
 
-Add `--deep` to also install deps in an isolated container (`--ignore-scripts`)
-and Trivy-scan the installed `node_modules`:
-```bash
-vet https://github.com/some/repo --deep
-```
+Passing = **"no known red flags"**, NOT proof. It tells you to build & run in
+`sandbox` (install-scripts off), and records the repo + commit so you don't re-vet
+every launch. A `curl|bash` in the source → refuses to record.
 
-Reading/scanning never executes the repo's code, so this stage cannot hurt you.
+> **Scope:** the malicious-package scan is **npm-only**. Python/Go/Rust get the
+> shell + secret/vuln checks but no dependency-malware scan — treat those extra
+> carefully.
 
 ### `sandbox <path> [--net|--watch]` — run it isolated (dynamic analysis)
 Safe by default: **network OFF**, runs as **non-root**, host repo mounted
@@ -44,32 +45,33 @@ Safe by default: **network OFF**, runs as **non-root**, host repo mounted
 build can't write trojans back to your disk), no home dir / SSH keys / secrets.
 
 ```bash
-sandbox /tmp/vet.XXXX/repo            # DEFAULT: network OFF — nothing phones home
-sandbox /tmp/vet.XXXX/repo --net      # network ON (builds that download); host FS still safe
-sandbox /tmp/vet.XXXX/repo --watch    # network ON + every connection LOGGED (tripwire)
+sandbox ~/repos/some-repo            # DEFAULT: network OFF — nothing phones home
+sandbox ~/repos/some-repo --net      # network ON (builds that download); host FS still safe
+sandbox ~/repos/some-repo --watch    # network ON + every connection LOGGED (tripwire)
 ```
 Inside the box:
 ```bash
-npm install --ignore-scripts   # install without running install-hooks
+npm ci --ignore-scripts   # install without running install-hooks
 npm run build
-exit                           # container destroyed, everything gone
+exit                      # container destroyed, everything gone
 ```
 
-> **`sandbox` is the load-bearing control; `vet` is only triage.** Never let
-> "vet passed" override suspicion — run everything in the sandbox regardless.
+> **`sandbox` is the load-bearing control; `saferepo` is only triage.** Never let
+> "it passed triage" override suspicion — build and run in the sandbox first.
 > Docker is not a VM: for genuinely targeted/hostile code, escalate to a
 > disposable VM (Lima/UTM) or a throwaway cloud Codespace.
 
 ## The method (why this order)
 
 1. **Assume hostile.** Never `npm install` on the host to "try it out."
-2. **Static first** (`vet`): look, don't execute.
-3. **Dynamic in a sealed box** (`sandbox`): no host access, no/monitored network, disposable.
-4. **Watch** (`--watch`): if it tries to connect somewhere weird, that's the tell.
+2. **Triage first** (`saferepo add`): scan, don't execute.
+3. **Build & run in a sealed box** (`sandbox`): no host access, install-scripts off, disposable.
+4. **Only then native.** A GUI app you've built & trust runs natively — ideally under a separate macOS user.
 5. **Destroy.** `--rm` / `exit` throws the environment away.
 
-Honest limit: no scanner catches a novel hand-made backdoor. That's *why* the
-sandbox exists — isolation protects you when scanning misses something.
+Honest limit: no scanner catches a novel hand-made backdoor, and Docker is not a
+hard VM boundary. That's *why* the sandbox + build-from-source come first —
+triage is a filter, isolation is the control.
 
 ## Golden rules
 - Never pipe to a shell: `curl … | bash` = handing over your machine.
