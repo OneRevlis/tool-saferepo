@@ -1,44 +1,60 @@
 #!/usr/bin/env bash
-# sandbox <path> [--no-net|--watch] — run an untrusted repo inside a hardened,
-# throwaway Docker container. NO access to your home dir, SSH keys, or secrets —
-# only the repo at /repo. Deleted on exit.
+# sandbox <path> [--net|--watch] — run an untrusted repo inside a hardened,
+# throwaway Docker container.
 #
-# Hardening applied to every mode:
-#   --cap-drop=ALL              drop all Linux capabilities
-#   --security-opt=no-new-privileges  block privilege escalation (sudo/setuid)
+# SAFE BY DEFAULT:
+#   - network OFF        (fail-closed; pass --net to enable, --watch to log)
+#   - runs as non-root   (--user node)
+#   - host repo is READ-ONLY at /src; you work on a throwaway copy in ~/app,
+#     so a hostile build cannot write .git/hooks or trojans back to your disk
+#   - no host home / SSH keys / secrets mounted
+#   - --cap-drop=ALL --security-opt=no-new-privileges, auto-deleted on exit
 #
 # Modes:
-#   (default)   network ON, host filesystem still isolated
-#   --no-net    network OFF — safest; nothing can phone home or exfiltrate
-#   --watch     network ON but every connection the code makes is LOGGED (tripwire)
+#   (default)   network OFF — nothing can phone home or exfiltrate
+#   --net       network ON (needed by builds that download); host FS still safe
+#   --watch     network ON + tcpdump sidecar LOGS outbound connections (tripwire)
+#
+# NOTE: Docker is not a VM. For genuinely targeted/hostile code, escalate to a
+# disposable VM (Lima/UTM) or a cloud Codespace — see README.
 set -euo pipefail
 
-REPO="${1:?usage: sandbox <local-repo-path> [--no-net|--watch]}"
+# Pinned by digest for reproducibility (update via install.sh).
+IMAGE="node@sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d"
+NETSHOOT="nicolaka/netshoot@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70"
+HARDEN=(--cap-drop=ALL --security-opt=no-new-privileges --user node)
+# copy the read-only source into a writable working dir owned by the node user
+COPY='mkdir -p ~/app && cp -a /src/. ~/app/ 2>/dev/null; cd ~/app && echo "[sandbox] host repo is READ-ONLY at /src; work on the writable copy in ~/app"'
+
+REPO="${1:?usage: sandbox <local-repo-path> [--net|--watch]}"
 REPO="$(cd "$REPO" && pwd)"
 MODE="${2:-}"
-IMAGE="node:22-bookworm"
-HARDEN=(--cap-drop=ALL --security-opt=no-new-privileges)
 
 case "$MODE" in
-  --no-net)
-    echo "=== sandbox: $REPO  (network: OFF, hardened, fs: isolated) ==="
-    docker run --rm -it --network none "${HARDEN[@]}" -v "$REPO":/repo -w /repo "$IMAGE" bash
-    ;;
   --watch)
-    echo "=== sandbox: $REPO  (network: ON + LOGGED, hardened, fs: isolated) ==="
-    echo "!! --watch LOGS traffic, it does not BLOCK it. Use --no-net for real protection."
+    echo "=== sandbox: $REPO  (network: ON + LOGGED, non-root, host RO) ==="
+    echo "!! --watch LOGS traffic, it does not BLOCK it. Omit it for real protection."
     NAME="vetbox_$$"
     cleanup() { docker rm -f "$NAME" "${NAME}_cap" >/dev/null 2>&1 || true; }
     trap cleanup EXIT
-    docker run -d --name "$NAME" "${HARDEN[@]}" -v "$REPO":/repo -w /repo "$IMAGE" sleep infinity >/dev/null
+    docker run -d --name "$NAME" "${HARDEN[@]}" -v "$REPO":/src:ro -w /home/node "$IMAGE" \
+      bash -c "$COPY && sleep infinity" >/dev/null
     docker run -d --name "${NAME}_cap" --network "container:$NAME" \
-      nicolaka/netshoot tcpdump -nn -q -l "tcp[tcpflags] & tcp-syn != 0 or udp port 53" >/dev/null
+      "$NETSHOOT" tcpdump -nn -q -l "tcp[tcpflags] & tcp-syn != 0 or udp port 53" >/dev/null
     echo ">> Live connection log streaming below; shell is under it."
     docker logs -f "${NAME}_cap" &
-    docker exec -it "$NAME" bash
+    docker exec -it -w /home/node/app "$NAME" bash
+    ;;
+  --net)
+    echo "=== sandbox: $REPO  (network: ON, non-root, host RO) ==="
+    docker run --rm -it "${HARDEN[@]}" -v "$REPO":/src:ro -w /home/node "$IMAGE" \
+      bash -c "$COPY && exec bash"
+    ;;
+  ""|--no-net)
+    echo "=== sandbox: $REPO  (network: OFF, non-root, host RO) ==="
+    docker run --rm -it --network none "${HARDEN[@]}" -v "$REPO":/src:ro -w /home/node "$IMAGE" \
+      bash -c "$COPY && exec bash"
     ;;
   *)
-    echo "=== sandbox: $REPO  (network: ON, hardened, fs: isolated) ==="
-    docker run --rm -it "${HARDEN[@]}" -v "$REPO":/repo -w /repo "$IMAGE" bash
-    ;;
+    echo "unknown option: $MODE (use --net or --watch)"; exit 2 ;;
 esac

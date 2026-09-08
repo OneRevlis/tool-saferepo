@@ -38,14 +38,15 @@ vet https://github.com/some/repo --deep
 
 Reading/scanning never executes the repo's code, so this stage cannot hurt you.
 
-### `sandbox <path> [--no-net|--watch]` — run it isolated (dynamic analysis)
-The container sees **only the repo** at `/repo` — no home dir, no SSH keys, no
-secrets — and is deleted on exit.
+### `sandbox <path> [--net|--watch]` — run it isolated (dynamic analysis)
+Safe by default: **network OFF**, runs as **non-root**, host repo mounted
+**read-only** at `/src` (you work on a throwaway copy in `~/app`, so a hostile
+build can't write trojans back to your disk), no home dir / SSH keys / secrets.
 
 ```bash
-sandbox /tmp/vet.XXXX/repo --no-net   # safest: network OFF, nothing can phone home
-sandbox /tmp/vet.XXXX/repo --watch    # network ON but every connection is LOGGED
-sandbox /tmp/vet.XXXX/repo            # network ON (needed by builds that download)
+sandbox /tmp/vet.XXXX/repo            # DEFAULT: network OFF — nothing phones home
+sandbox /tmp/vet.XXXX/repo --net      # network ON (builds that download); host FS still safe
+sandbox /tmp/vet.XXXX/repo --watch    # network ON + every connection LOGGED (tripwire)
 ```
 Inside the box:
 ```bash
@@ -53,6 +54,11 @@ npm install --ignore-scripts   # install without running install-hooks
 npm run build
 exit                           # container destroyed, everything gone
 ```
+
+> **`sandbox` is the load-bearing control; `vet` is only triage.** Never let
+> "vet passed" override suspicion — run everything in the sandbox regardless.
+> Docker is not a VM: for genuinely targeted/hostile code, escalate to a
+> disposable VM (Lima/UTM) or a throwaway cloud Codespace.
 
 ## The method (why this order)
 

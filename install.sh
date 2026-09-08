@@ -19,10 +19,10 @@ for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
 done
 
 echo ">> Pre-pulling scanner + sandbox images (one time)..."
-docker pull aquasec/trivy:latest         >/dev/null 2>&1 || true
-docker pull ghcr.io/datadog/guarddog:latest >/dev/null 2>&1 || true
-docker pull node:22-bookworm             >/dev/null 2>&1 || true
-docker pull nicolaka/netshoot            >/dev/null 2>&1 || true
+docker pull aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 >/dev/null 2>&1 || true
+docker pull ghcr.io/datadog/guarddog@sha256:3dbc783f65f508b95222101cb2cd84d1d5f3e3675e42d6f1329bb9b8a99c8998 >/dev/null 2>&1 || true
+docker pull node@sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d >/dev/null 2>&1 || true
+docker pull nicolaka/netshoot@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70 >/dev/null 2>&1 || true
 
 echo
 echo ">> Done. Restart your terminal (or: source ~/.zshrc), then:"
